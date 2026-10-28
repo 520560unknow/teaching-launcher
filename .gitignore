@@ -1,0 +1,31 @@
+# 编译产物
+bin/
+obj/
+.vs/
+publish/
+*.user
+*.suo
+
+# 运行时与本地数据
+app/
+demo/
+json-storage/
+json-upload/
+logs/
+video-temp/
+video-uploads/
+.uploads/
+.screenshots/
+.mimocode/
+*.log
+
+# 大文件与交付物
+*.mp4
+*.zip
+*.docx
+*.jar
+*.gguf
+*.bin
+
+# 提交包内的源码副本
+李儒健*/

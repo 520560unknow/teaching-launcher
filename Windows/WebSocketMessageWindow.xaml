@@ -1,0 +1,166 @@
+<Window x:Class="StartMode.Windows.WebSocketMessageWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:models="clr-namespace:StartMode.Models"
+        xmlns:local="clr-namespace:StartMode.Windows"
+        Title="课堂消息监听"
+        Width="420" Height="650"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        Topmost="True"
+        ShowInTaskbar="False"
+        ResizeMode="NoResize"
+        Loaded="Window_Loaded"
+        Closing="Window_Closing">
+    
+    <Border Background="#E61E1E2E" CornerRadius="12" Margin="8">
+        <Border.Effect>
+            <DropShadowEffect BlurRadius="15" ShadowDepth="2" Opacity="0.4"/>
+        </Border.Effect>
+        
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+            
+            <!-- 顶部标题栏 -->
+            <Border Grid.Row="0" Background="#2D2D3E" CornerRadius="12,12,0,0"
+                    MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
+                <Grid Margin="12,8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock Text="课堂消息监听" Foreground="White" FontSize="14" FontWeight="SemiBold"
+                                   VerticalAlignment="Center"/>
+                        <Border x:Name="StatusBadge" Background="#666" CornerRadius="8" Padding="8,2" Margin="10,0,0,0">
+                            <TextBlock x:Name="StatusText" Text="未连接" Foreground="White" FontSize="11"/>
+                        </Border>
+                    </StackPanel>
+                    
+                    <StackPanel Grid.Column="1" Orientation="Horizontal">
+                        <Button Content="—" Click="Minimize_Click" Width="28" Height="24" 
+                                Background="Transparent" Foreground="#AAA" BorderThickness="0"
+                                Cursor="Hand" FontSize="14" FontWeight="Bold" Padding="0,-2,0,0"/>
+                        <Button Content="×" Click="Close_Click" Width="28" Height="24" 
+                                Background="Transparent" Foreground="#FF6B6B" BorderThickness="0"
+                                Cursor="Hand" FontSize="16" FontWeight="Bold" Padding="0,-2,0,0"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+            
+            <!-- 课堂 ID 输入区 -->
+            <Border Grid.Row="1" Background="#252536" Padding="12,8">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    
+                    <TextBlock Grid.Column="0" Text="课堂ID:" Foreground="#AAA" FontSize="12"
+                               VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <TextBox x:Name="ClassroomIdBox" Grid.Column="1" 
+                             Background="#1A1A2E" Foreground="White" BorderBrush="#444"
+                             FontSize="12" Padding="6,4" VerticalContentAlignment="Center"
+                             VerticalAlignment="Center"/>
+                    <Button x:Name="ConnectBtn" Grid.Column="2" Content="连接" 
+                            Click="Connect_Click"
+                            Background="#4CAF50" Foreground="White" BorderThickness="0"
+                            FontSize="12" Padding="12,4" Margin="8,0,0,0"
+                            Cursor="Hand" VerticalAlignment="Center"/>
+                    <Button x:Name="DisconnectBtn" Grid.Column="3" Content="断开" 
+                            Click="Disconnect_Click"
+                            Background="#F44336" Foreground="White" BorderThickness="0"
+                            FontSize="12" Padding="12,4" Margin="4,0,0,0"
+                            Cursor="Hand" VerticalAlignment="Center"
+                            Visibility="Collapsed"/>
+                </Grid>
+            </Border>
+            
+            <!-- 分类切换按钮 -->
+            <Border Grid.Row="2" Background="#1E1E2E" Padding="12,6">
+                <StackPanel Orientation="Horizontal">
+                    <Button x:Name="FilterAll" Content="全部" Click="Filter_Click" Tag=""
+                            Background="#3D3D5C" Foreground="White" BorderThickness="0"
+                            FontSize="12" Padding="12,4" Margin="0,0,6,0" Cursor="Hand"/>
+                    <Button x:Name="FilterDanmaku" Content="弹幕 0" Click="Filter_Click" Tag="Danmaku"
+                            Background="#3D3D5C" Foreground="#64B5F6" BorderThickness="0"
+                            FontSize="12" Padding="12,4" Margin="0,0,6,0" Cursor="Hand"/>
+                    <Button x:Name="FilterComment" Content="评论 0" Click="Filter_Click" Tag="Comment"
+                            Background="#3D3D5C" Foreground="#81C784" BorderThickness="0"
+                            FontSize="12" Padding="12,4" Margin="0,0,6,0" Cursor="Hand"/>
+                    <Button x:Name="FilterOpinion" Content="观点 0" Click="Filter_Click" Tag="Opinion"
+                            Background="#3D3D5C" Foreground="#FFB74D" BorderThickness="0"
+                            FontSize="12" Padding="12,4" Margin="0,0,6,0" Cursor="Hand"/>
+                </StackPanel>
+            </Border>
+            
+            <!-- 消息列表 -->
+            <ListBox x:Name="MessageList" Grid.Row="3" 
+                     Background="Transparent" BorderThickness="0"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                     SelectionMode="Single">
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <Border Background="#2A2A3E" CornerRadius="6" Padding="10,8" Margin="4,2"
+                                BorderBrush="#3A3A4E" BorderThickness="1">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                
+                                <!-- 时间 + 分类标签 -->
+                                <StackPanel Grid.Row="0" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,0,0,4">
+                                    <TextBlock Text="{Binding DisplayTime}" Foreground="#888" FontSize="11"/>
+                                    <Border Background="{Binding Category, Converter={StaticResource CategoryToColor}}" 
+                                            CornerRadius="4" Padding="6,1" Margin="8,0,0,0">
+                                        <TextBlock Text="{Binding CategoryLabel}" Foreground="White" FontSize="10"/>
+                                    </Border>
+                                    <TextBlock Text="{Binding SenderDisplay}" Foreground="#BBB" FontSize="11" Margin="8,0,0,0"/>
+                                </StackPanel>
+                                
+                                <!-- 标题（观点） -->
+                                <TextBlock Grid.Row="1" Grid.ColumnSpan="2" 
+                                           Text="{Binding Title}" Foreground="#FFB74D" FontSize="12" FontWeight="SemiBold"
+                                           Margin="0,0,0,2" TextWrapping="Wrap"
+                                           Visibility="{Binding Title, Converter={StaticResource StringToVisibility}}"/>
+                                
+                                <!-- 内容 -->
+                                <TextBlock Grid.Row="2" Grid.ColumnSpan="2" 
+                                           Text="{Binding Content}" Foreground="White" FontSize="12"
+                                           TextWrapping="Wrap"/>
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+            
+            <!-- 底部状态栏 -->
+            <Border Grid.Row="4" Background="#1A1A2E" CornerRadius="0,0,12,12" Padding="12,6">
+                <TextBlock x:Name="BottomStatus" Text="请输入课堂 ID 后点击连接" 
+                           Foreground="#666" FontSize="11" HorizontalAlignment="Center"/>
+            </Border>
+        </Grid>
+    </Border>
+    
+    <Window.Resources>
+        <!-- 分类颜色转换器 -->
+        <local:CategoryToColorConverter x:Key="CategoryToColor"/>
+        <local:StringToVisibilityConverter x:Key="StringToVisibility"/>
+    </Window.Resources>
+</Window>

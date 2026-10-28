@@ -1,0 +1,161 @@
+<Window x:Class="StudentMessageBall.Windows.MessagePanelWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:models="clr-namespace:StudentMessageBall.Models"
+        Title="学生消息" Height="500" Width="380"
+        WindowStyle="ToolWindow"
+        WindowStartupLocation="Manual"
+        Topmost="True"
+        ShowInTaskbar="False"
+        ResizeMode="CanResize"
+        MinWidth="300" MinHeight="300"
+        Closing="Window_Closing">
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- 标题栏 -->
+        <Border Grid.Row="0" Background="#4A90D9" Padding="10,8">
+            <Grid>
+                <TextBlock Text="学生消息" Foreground="White" FontSize="14" FontWeight="Bold"
+                           VerticalAlignment="Center"/>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button Content="全部已读" Style="{StaticResource SmallButtonStyle}"
+                            Click="BtnMarkAllRead_Click" Margin="0,0,8,0"/>
+                    <Button Content="✕" Style="{StaticResource SmallButtonStyle}"
+                            Click="BtnClose_Click"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- 筛选标签 -->
+        <Border Grid.Row="1" Background="#F5F5F5" Padding="8,6">
+            <StackPanel Orientation="Horizontal">
+                <RadioButton x:Name="RbAll" Content="全部" GroupName="FilterType"
+                             IsChecked="True" Checked="FilterChanged" Margin="0,0,12,0"/>
+                <RadioButton x:Name="RbComment" Content="评论" GroupName="FilterType"
+                             Checked="FilterChanged" Margin="0,0,12,0"/>
+                <RadioButton x:Name="RbDanmaku" Content="弹幕" GroupName="FilterType"
+                             Checked="FilterChanged" Margin="0,0,12,0"/>
+                <RadioButton x:Name="RbOpinion" Content="观点" GroupName="FilterType"
+                             Checked="FilterChanged"/>
+            </StackPanel>
+        </Border>
+
+        <!-- 消息列表 -->
+        <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
+            <ItemsControl x:Name="MessagesList" Margin="4">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="{x:Type models:StudentMessage}">
+                        <Border Margin="4,3" Padding="10,8" CornerRadius="6"
+                                Background="White"
+                                BorderBrush="#E0E0E0" BorderThickness="1">
+                            <Border.Style>
+                                <Style TargetType="Border">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding Status}"
+                                                     Value="{x:Static models:MessageStatus.Unread}">
+                                            <Setter Property="Background" Value="#E3F2FD"/>
+                                            <Setter Property="BorderBrush" Value="#90CAF9"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Border.Style>
+
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+
+                                <!-- 第一行: 姓名 + 类型 + 时间 -->
+                                <Grid Grid.Row="0" Margin="0,0,0,4">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="{Binding StudentName}"
+                                                   FontWeight="Bold" FontSize="13"
+                                                   Foreground="#333"/>
+                                        <Border CornerRadius="3" Padding="4,1" Margin="8,0,0,0"
+                                                VerticalAlignment="Center">
+                                            <Border.Style>
+                                                <Style TargetType="Border">
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding Type}"
+                                                                     Value="{x:Static models:MessageType.Comment}">
+                                                            <Setter Property="Background" Value="#E8F5E9"/>
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding Type}"
+                                                                     Value="{x:Static models:MessageType.Danmaku}">
+                                                            <Setter Property="Background" Value="#FFF3E0"/>
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding Type}"
+                                                                     Value="{x:Static models:MessageType.Opinion}">
+                                                            <Setter Property="Background" Value="#F3E5F5"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Border.Style>
+                                            <TextBlock FontSize="10" Foreground="#666"
+                                                       Text="{Binding Type, Converter={StaticResource MessageTypeConverter}}"/>
+                                        </Border>
+                                    </StackPanel>
+                                    <TextBlock Text="{Binding Timestamp, StringFormat='{}{0:HH:mm:ss}'}"
+                                               FontSize="10" Foreground="#999"
+                                               HorizontalAlignment="Right"/>
+                                </Grid>
+
+                                <!-- 第二行: 内容 -->
+                                <TextBlock Grid.Row="1" Text="{Binding Content}"
+                                           FontSize="12" Foreground="#555"
+                                           TextWrapping="Wrap"
+                                           MaxHeight="60" TextTrimming="CharacterEllipsis"/>
+
+                                <!-- 来源信息 -->
+                                <TextBlock Grid.Row="1" Text="{Binding Source}"
+                                           FontSize="9" Foreground="#AAA"
+                                           HorizontalAlignment="Right"
+                                           VerticalAlignment="Bottom"
+                                           Visibility="{Binding Source, Converter={StaticResource StringToVisibilityConverter}}"/>
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+
+                <!-- 空状态 -->
+                <ItemsControl.Template>
+                    <ControlTemplate TargetType="ItemsControl">
+                        <Grid>
+                            <ScrollViewer x:Name="ScrollViewer" CanContentScroll="True"
+                                          VerticalScrollBarVisibility="Auto">
+                                <ItemsPresenter/>
+                            </ScrollViewer>
+                            <TextBlock x:Name="EmptyText" Text="暂无消息"
+                                       Foreground="#AAA" FontSize="14"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center"
+                                       Visibility="Collapsed"/>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="HasItems" Value="False">
+                                <Setter TargetName="EmptyText" Property="Visibility" Value="Visible"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </ItemsControl.Template>
+            </ItemsControl>
+        </ScrollViewer>
+
+        <!-- 底部统计 -->
+        <Border Grid.Row="3" Background="#F5F5F5" Padding="8,6">
+            <StackPanel Orientation="Horizontal">
+                <TextBlock x:Name="TxtStats" Text="共 0 条消息"
+                           FontSize="11" Foreground="#888"
+                           VerticalAlignment="Center"/>
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>

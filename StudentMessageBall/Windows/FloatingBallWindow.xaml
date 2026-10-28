@@ -1,0 +1,75 @@
+<Window x:Class="StudentMessageBall.Windows.FloatingBallWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        Topmost="True"
+        ShowInTaskbar="False"
+        ResizeMode="NoResize"
+        Width="96" Height="96"
+        Loaded="Window_Loaded"
+        Closing="Window_Closing">
+
+    <Grid>
+        <!-- 阴影层 -->
+        <Ellipse Fill="#33000000" Margin="2,4,0,0" />
+
+        <!-- 主体圆形 -->
+        <Border x:Name="MainCircle" CornerRadius="40" Margin="2,2,4,4"
+                Background="#FF4A90D9"
+                MouseLeftButtonDown="MainCircle_MouseLeftButtonDown"
+                MouseRightButtonDown="MainCircle_MouseRightButtonDown"
+                MouseLeftButtonUp="MainCircle_MouseLeftButtonUp"
+                MouseMove="MainCircle_MouseMove">
+            <Border.Effect>
+                <DropShadowEffect Color="#40000000" BlurRadius="10" ShadowDepth="2" Opacity="0.6"/>
+            </Border.Effect>
+
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <!-- 标题行 -->
+                <TextBlock Grid.Row="0" Text="消息" HorizontalAlignment="Center"
+                           FontSize="11" Foreground="White" Margin="0,8,0,0"/>
+
+                <!-- 中央区域 - 点击打开网页 -->
+                <Button x:Name="BtnOpenWeb" Grid.Row="1"
+                        Width="44" Height="44"
+                        Style="{StaticResource CircleButtonStyle}"
+                        Click="BtnOpenWeb_Click"
+                        Cursor="Hand"
+                        ToolTip="打开教学系统">
+                    <TextBlock Text="📖" FontSize="20" Foreground="White"/>
+                </Button>
+
+                <!-- 角标行 -->
+                <Grid Grid.Row="2" Margin="0,0,0,8">
+                    <!-- 消息角标 -->
+                    <Border x:Name="BadgeBorder"
+                            HorizontalAlignment="Center"
+                            CornerRadius="10"
+                            Background="#FFE74C3C"
+                            Padding="6,2"
+                            Visibility="Collapsed"
+                            MouseLeftButtonDown="BadgeBorder_MouseLeftButtonDown"
+                            Cursor="Hand">
+                        <TextBlock x:Name="TxtBadge" Text="0"
+                                   FontSize="11" FontWeight="Bold"
+                                   Foreground="White"/>
+                    </Border>
+                </Grid>
+            </Grid>
+        </Border>
+
+        <!-- 离线指示器 -->
+        <Ellipse x:Name="OfflineIndicator" Width="12" Height="12"
+                 Fill="#FF888888" HorizontalAlignment="Right"
+                 VerticalAlignment="Top" Margin="0,4,8,0"
+                 Visibility="Collapsed"/>
+    </Grid>
+</Window>

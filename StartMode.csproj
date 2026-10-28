@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2739.15" />
+    <PackageReference Include="System.Text.Json" Version="8.0.5" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="appsettings.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="app\firestDemo-0.0.1-SNAPSHOT.jar">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="app\llama\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="app\ai-corpus\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="app\json-storage\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="WpfApp1\**" />
+    <EmbeddedResource Remove="WpfApp1\**" />
+    <None Remove="WpfApp1\**" />
+    <Page Remove="WpfApp1\**" />
+
+    <!-- 提交包内的源码副本不参与编译，否则会与主工程重复定义 -->
+    <Compile Remove="李儒健202410011831+课堂智答\**" />
+    <EmbeddedResource Remove="李儒健202410011831+课堂智答\**" />
+    <None Remove="李儒健202410011831+课堂智答\**" />
+    <Page Remove="李儒健202410011831+课堂智答\**" />
+  </ItemGroup>
+
+</Project>
