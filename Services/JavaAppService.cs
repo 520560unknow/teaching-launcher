@@ -1,33 +1,47 @@
 using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
-using System.Threading;
+using StartMode.Models;
 
 namespace StartMode.Services
 {
-    public class JavaAppService
+    public class JavaAppService : ManagedProcessService, IJavaAppService
     {
-        private readonly SemaphoreSlim _startLock = new(1, 1);
         private readonly HttpClient _httpClient = new() { Timeout = TimeSpan.FromSeconds(3) };
         private readonly string _healthUrl;
         private readonly string _jarPath;
         private readonly string _configJavaPath;
 
-        private Process? _javaProcess;
-        private bool _startedByUs;
+        private string? _resolvedJavaExe;
 
-        /// <summary>是否正在拉起 Java 进程（用于界面显示“启动中”）</summary>
-        public bool IsStarting { get; private set; }
-
-        public JavaAppService()
+        public JavaAppService(AppConfig config)
         {
             var baseDir = AppDomain.CurrentDomain.BaseDirectory;
-            var config = App.ConfigService.Config;
 
             _healthUrl = config.ServerHealthUrl;
             _jarPath = Path.Combine(baseDir, config.SpringBootJarPath);
             _configJavaPath = Path.Combine(baseDir, config.JavaExePath);
         }
+
+        protected override string ServiceTag => "[JavaApp]";
+        protected override string OutputTag => "[java]";
+        protected override string ErrorTag => "[java:err]";
+        protected override string StartingLog => "[JavaApp] 正在启动 Java 应用...";
+        protected override string SuccessLog => "[JavaApp] Java 应用启动成功";
+        protected override string TimeoutLog => "[JavaApp] Java 应用启动超时，清理进程";
+        protected override string TimeoutMessage => "网页服务启动超时";
+        protected override int TimeoutSeconds => 60;
+        protected override int FastPollWindowSeconds => 10;
+        protected override int FastPollIntervalMs => 300;
+        protected override int SlowPollIntervalMs => 1000;
+
+        protected override Task<bool> ProbeReadyAsync() => IsServerHealthyAsync();
+
+        protected override string FormatFailure(Exception ex) => string.Empty;
+
+        protected override void LogKilling(int pid) => Debug.WriteLine($"[JavaApp] 杀进程树 PID={pid}");
+
+        protected override void LogKillFailed(Exception ex) => Debug.WriteLine($"[JavaApp] 停止失败: {ex.Message}");
 
         public async Task<bool> IsServerHealthyAsync()
         {
@@ -47,106 +61,62 @@ namespace StartMode.Services
             if (await IsServerHealthyAsync())
                 return true;
 
-            await _startLock.WaitAsync();
-            try
+            return await WithLockAsync(async () =>
             {
                 if (await IsServerHealthyAsync())
                     return true;
 
                 return await StartJavaAppAsync();
-            }
-            finally
-            {
-                _startLock.Release();
-            }
+            });
         }
 
         private async Task<bool> StartJavaAppAsync()
         {
+            var (ok, _) = await LaunchAsync();
+            return ok;
+        }
+
+        protected override Task<string?> ValidateAsync()
+        {
             if (!File.Exists(_jarPath))
             {
                 Debug.WriteLine($"[JavaApp] JAR 文件不存在: {_jarPath}");
-                return false;
+                return Task.FromResult<string?>(string.Empty);
             }
 
-            string? javaExe = FindJavaExecutable();
-            if (javaExe == null)
+            _resolvedJavaExe = FindJavaExecutable();
+            if (_resolvedJavaExe == null)
             {
                 Debug.WriteLine("[JavaApp] 找不到 Java 可执行文件");
-                return false;
+                return Task.FromResult<string?>(string.Empty);
             }
 
-            try
-            {
-                IsStarting = true;
-                var startInfo = new ProcessStartInfo
-                {
-                    FileName = javaExe,
-                    Arguments = $"-jar \"{_jarPath}\"",
-                    UseShellExecute = false,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    CreateNoWindow = true,
-                    WorkingDirectory = Path.GetDirectoryName(_jarPath)
-                };
-
-                _javaProcess = new Process { StartInfo = startInfo };
-                _javaProcess.OutputDataReceived += (_, e) =>
-                {
-                    if (!string.IsNullOrWhiteSpace(e.Data))
-                        Debug.WriteLine($"[java] {e.Data}");
-                };
-                _javaProcess.ErrorDataReceived += (_, e) =>
-                {
-                    if (!string.IsNullOrWhiteSpace(e.Data))
-                        Debug.WriteLine($"[java:err] {e.Data}");
-                };
-
-                _javaProcess.Start();
-                _javaProcess.BeginOutputReadLine();
-                _javaProcess.BeginErrorReadLine();
-                _startedByUs = true;
-
-                Debug.WriteLine("[JavaApp] 正在启动 Java 应用...");
-                var ready = await WaitForHealthAsync(60);
-
-                if (ready)
-                {
-                    Debug.WriteLine("[JavaApp] Java 应用启动成功");
-                    return true;
-                }
-                else
-                {
-                    Debug.WriteLine("[JavaApp] Java 应用启动超时，清理进程");
-                    KillSpawnedProcess();
-                    return false;
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"[JavaApp] 启动失败: {ex.Message}");
-                KillSpawnedProcess();
-                return false;
-            }
-            finally
-            {
-                IsStarting = false;
-            }
+            return Task.FromResult<string?>(null);
         }
+
+        protected override ProcessStartInfo BuildStartInfo() => new()
+        {
+            FileName = _resolvedJavaExe!,
+            Arguments = $"-jar \"{_jarPath}\"",
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+            WorkingDirectory = Path.GetDirectoryName(_jarPath)
+        };
 
         public Task<bool> StartAsync() => EnsureStartedAsync();
 
         public async Task<(bool ok, string message)> StopAsync()
         {
-            await _startLock.WaitAsync();
-            try
+            return await WithLockAsync(async () =>
             {
                 var port = GetPort(_healthUrl);
                 var killed = false;
 
-                if (_javaProcess != null)
+                if (TrackedProcess != null)
                 {
-                    KillSpawnedProcess();
+                    StopTrackedProcess();
                     killed = true;
                 }
 
@@ -159,33 +129,12 @@ namespace StartMode.Services
                 }
 
                 return (true, killed ? "网页服务已关闭" : "网页服务本来就没在运行");
-            }
-            finally
-            {
-                _startLock.Release();
-            }
+            });
         }
 
         private static int GetPort(string url)
         {
             return Uri.TryCreate(url, UriKind.Absolute, out var uri) ? uri.Port : 0;
-        }
-
-        private async Task<bool> WaitForHealthAsync(int timeoutSeconds)
-        {
-            var deadline = DateTime.UtcNow.AddSeconds(timeoutSeconds);
-            var fastUntil = DateTime.UtcNow.AddSeconds(10);
-
-            while (DateTime.UtcNow < deadline)
-            {
-                if (await IsServerHealthyAsync())
-                    return true;
-
-                var delay = DateTime.UtcNow < fastUntil ? 300 : 1000;
-                await Task.Delay(delay);
-            }
-
-            return false;
         }
 
         private string? FindJavaExecutable()
@@ -223,44 +172,19 @@ namespace StartMode.Services
             return null;
         }
 
+        /// <summary>
+        /// 退出兜底：结束自己跟踪的进程树；若端口仍被 java 进程占用（例如上次异常退出留下的），
+        /// 也一并清理，避免下次启动端口被占。
+        /// </summary>
         public void StopJavaApp()
         {
-            if (!_startedByUs)
-                return;
+            StopTrackedProcess();
 
-            KillSpawnedProcess();
-        }
-
-        private void KillSpawnedProcess()
-        {
-            if (_javaProcess == null)
-                return;
-
-            try
+            var port = GetPort(_healthUrl);
+            if (port > 0 && PortUtils.IsHeldBy(port, "java", "javaw"))
             {
-                if (!_javaProcess.HasExited)
-                {
-                    var pid = _javaProcess.Id;
-                    Debug.WriteLine($"[JavaApp] 杀进程树 PID={pid}");
-
-                    Process.Start(new ProcessStartInfo
-                    {
-                        FileName = "taskkill",
-                        Arguments = $"/T /F /PID {pid}",
-                        CreateNoWindow = true,
-                        UseShellExecute = false
-                    });
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"[JavaApp] 停止失败: {ex.Message}");
-            }
-            finally
-            {
-                _javaProcess.Dispose();
-                _javaProcess = null;
-                _startedByUs = false;
+                Debug.WriteLine($"[JavaApp] 退出时清理占用 {port} 的残留 java 进程");
+                PortUtils.KillPort(port);
             }
         }
     }

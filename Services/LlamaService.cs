@@ -1,36 +1,44 @@
 using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
+using StartMode.Models;
 
 namespace StartMode.Services
 {
     /// <summary>
     /// 本地 llama.cpp 推理服务：随启动器分发的 llama-server，按需启动/停止。
     /// </summary>
-    public class LlamaService
+    public class LlamaService : ManagedProcessService, ILlamaService
     {
         private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(2) };
-        private readonly SemaphoreSlim _lock = new(1, 1);
 
         private readonly string _baseUrl;
         private readonly int _port;
         private readonly string _exePath;
         private readonly string _modelPath;
 
-        private Process? _process;
-
-        /// <summary>是否正在拉起模型进程（用于界面显示“启动中”）</summary>
-        public bool IsStarting { get; private set; }
-
-        public LlamaService()
+        public LlamaService(AppConfig config)
         {
-            var config = App.ConfigService.Config;
             var baseDir = AppDomain.CurrentDomain.BaseDirectory;
 
-            _baseUrl = string.IsNullOrWhiteSpace(config.LlamaBaseUrl)
-                ? "http://127.0.0.1:8081"
-                : config.LlamaBaseUrl.TrimEnd('/');
+            // 端口以 llamaPort 为准（启动 llama-server 时用的就是它），
+            // 地址只取配置里的协议与主机，避免两处配置打架导致"起来了但探测不到"。
             _port = config.LlamaPort > 0 ? config.LlamaPort : 8081;
+
+            var scheme = "http";
+            var host = "127.0.0.1";
+            if (!string.IsNullOrWhiteSpace(config.LlamaBaseUrl)
+                && Uri.TryCreate(config.LlamaBaseUrl.Trim(), UriKind.Absolute, out var configured))
+            {
+                scheme = configured.Scheme;
+                host = configured.Host;
+                if (!configured.IsDefaultPort && configured.Port != _port)
+                {
+                    Debug.WriteLine($"[Llama] 配置地址端口 {configured.Port} 与 llamaPort {_port} 不一致，以 llamaPort 为准");
+                }
+            }
+
+            _baseUrl = $"{scheme}://{host}:{_port}";
             _exePath = Path.IsPathRooted(config.LlamaServerPath)
                 ? config.LlamaServerPath
                 : Path.Combine(baseDir, config.LlamaServerPath);
@@ -39,6 +47,20 @@ namespace StartMode.Services
 
         public string ModelPath => _modelPath;
         public int Port => _port;
+
+        protected override string ServiceTag => "[Llama]";
+        protected override string OutputTag => "[llama]";
+        protected override string ErrorTag => "[llama:err]";
+        protected override string StartingLog => $"[Llama] 启动中，模型：{_modelPath}";
+        protected override string TimeoutMessage => "AI 服务启动超时（模型加载可能过慢）";
+        protected override int TimeoutSeconds => 120;
+        protected override bool AbortIfProcessExited => true;
+
+        protected override Task<bool> ProbeReadyAsync() => IsRunningAsync();
+
+        protected override string FormatFailure(Exception ex) => $"AI 服务启动失败：{ex.Message}";
+
+        protected override void LogKillFailed(Exception ex) => Debug.WriteLine($"[Llama] 结束进程失败: {ex.Message}");
 
         public async Task<bool> IsRunningAsync()
         {
@@ -58,77 +80,45 @@ namespace StartMode.Services
             if (await IsRunningAsync())
                 return (true, "AI 服务已在运行");
 
-            await _lock.WaitAsync();
-            try
+            return await WithLockAsync(async () =>
             {
                 if (await IsRunningAsync())
                     return (true, "AI 服务已在运行");
 
-                if (!File.Exists(_exePath))
-                    return (false, $"找不到 llama-server：{_exePath}");
+                var (ok, message) = await LaunchAsync();
 
-                if (string.IsNullOrWhiteSpace(_modelPath) || !File.Exists(_modelPath))
-                    return (false, "找不到模型文件，请在 appsettings.json 里配置 llamaModelPath");
-
-                IsStarting = true;
-                var startInfo = new ProcessStartInfo
-                {
-                    FileName = _exePath,
-                    Arguments = $"-m \"{_modelPath}\" --host 127.0.0.1 --port {_port}",
-                    WorkingDirectory = Path.GetDirectoryName(_exePath) ?? AppDomain.CurrentDomain.BaseDirectory,
-                    UseShellExecute = false,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    CreateNoWindow = true
-                };
-
-                _process = new Process { StartInfo = startInfo };
-                _process.OutputDataReceived += (_, e) =>
-                {
-                    if (!string.IsNullOrWhiteSpace(e.Data))
-                        Debug.WriteLine($"[llama] {e.Data}");
-                };
-                _process.ErrorDataReceived += (_, e) =>
-                {
-                    if (!string.IsNullOrWhiteSpace(e.Data))
-                        Debug.WriteLine($"[llama:err] {e.Data}");
-                };
-
-                _process.Start();
-                _process.BeginOutputReadLine();
-                _process.BeginErrorReadLine();
-                Debug.WriteLine($"[Llama] 启动中，模型：{_modelPath}");
-
-                if (await WaitForReadyAsync(120))
-                {
-                    Debug.WriteLine("[Llama] 启动成功");
-                    return (true, "AI 服务已启动");
-                }
-
-                Debug.WriteLine("[Llama] 启动超时，清理进程");
-                StopInternal();
-                return (false, "AI 服务启动超时（模型加载可能过慢）");
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"[Llama] 启动失败: {ex.Message}");
-                StopInternal();
-                return (false, $"AI 服务启动失败：{ex.Message}");
-            }
-            finally
-            {
-                IsStarting = false;
-                _lock.Release();
-            }
+                return ok ? (true, "AI 服务已启动") : (ok, message);
+            });
         }
+
+        protected override Task<string?> ValidateAsync()
+        {
+            if (!File.Exists(_exePath))
+                return Task.FromResult<string?>($"找不到 llama-server：{_exePath}");
+
+            if (string.IsNullOrWhiteSpace(_modelPath) || !File.Exists(_modelPath))
+                return Task.FromResult<string?>("找不到模型文件，请在 appsettings.json 里配置 llamaModelPath");
+
+            return Task.FromResult<string?>(null);
+        }
+
+        protected override ProcessStartInfo BuildStartInfo() => new()
+        {
+            FileName = _exePath,
+            Arguments = $"-m \"{_modelPath}\" --host 127.0.0.1 --port {_port}",
+            WorkingDirectory = Path.GetDirectoryName(_exePath) ?? AppDomain.CurrentDomain.BaseDirectory,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
 
         public async Task<(bool ok, string message)> StopAsync()
         {
-            await _lock.WaitAsync();
-            try
+            return await WithLockAsync<(bool ok, string message)>(() =>
             {
-                var tracked = _process != null;
-                StopInternal();
+                var tracked = TrackedProcess != null;
+                StopTrackedProcess();
 
                 // 即使不是本程序启动的，也按端口结束进程，确保端口释放
                 var killedByPort = PortUtils.KillPort(_port);
@@ -138,57 +128,15 @@ namespace StartMode.Services
                     return (false, $"端口 {_port} 仍被占用，关闭失败");
 
                 return (true, tracked || killedByPort ? "AI 服务已关闭" : "AI 服务本来就没在运行");
-            }
-            finally
-            {
-                _lock.Release();
-            }
+            });
         }
 
-        private void StopInternal()
+        /// <summary>退出时使用：不等端口释放，直接结束进程并清理端口占用。</summary>
+        public void StopImmediately()
         {
-            var process = _process;
-            _process = null;
-            if (process == null)
-                return;
-
-            try
-            {
-                if (!process.HasExited)
-                {
-                    Process.Start(new ProcessStartInfo
-                    {
-                        FileName = "taskkill",
-                        Arguments = $"/T /F /PID {process.Id}",
-                        CreateNoWindow = true,
-                        UseShellExecute = false
-                    });
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"[Llama] 结束进程失败: {ex.Message}");
-            }
-            finally
-            {
-                process.Dispose();
-            }
-        }
-
-        private async Task<bool> WaitForReadyAsync(int timeoutSeconds)
-        {
-            var deadline = DateTime.UtcNow.AddSeconds(timeoutSeconds);
-            while (DateTime.UtcNow < deadline)
-            {
-                if (_process?.HasExited == true)
-                    return false;
-
-                if (await IsRunningAsync())
-                    return true;
-
-                await Task.Delay(500);
-            }
-            return false;
+            StopTrackedProcess();
+            try { PortUtils.KillPort(_port); }
+            catch (Exception ex) { Debug.WriteLine($"[Llama] 强制结束失败: {ex.Message}"); }
         }
 
         private static string ResolveModelPath(string configured, string baseDir)

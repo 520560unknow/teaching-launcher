@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Windows;
 using System.Windows.Data;
@@ -10,17 +11,18 @@ namespace StartMode.Windows
 {
     public partial class WebSocketMessageWindow : Window
     {
-        private readonly WebSocketMonitorService _monitor;
+        private readonly IWebSocketMonitorService _monitor;
+        private readonly ObservableCollection<ClassroomMessageItem> _messages = new();
         private string _currentFilter = "";
         private ICollectionView? _messagesView;
 
-        public WebSocketMessageWindow()
+        public WebSocketMessageWindow(IWebSocketMonitorService monitor)
         {
             InitializeComponent();
-            _monitor = App.WsMonitorService;
+            _monitor = monitor;
 
-            // 绑定消息列表
-            _messagesView = CollectionViewSource.GetDefaultView(_monitor.Messages);
+            // 绑定消息列表（列表由本窗口持有，服务工作线程只抛事件）
+            _messagesView = CollectionViewSource.GetDefaultView(_messages);
             _messagesView.Filter = FilterMessage;
             MessageList.ItemsSource = _messagesView;
 
@@ -119,6 +121,11 @@ namespace StartMode.Windows
         {
             Dispatcher.BeginInvoke(() =>
             {
+                _messages.Insert(0, item);
+                // 限制最大条数
+                while (_messages.Count > 500)
+                    _messages.RemoveAt(_messages.Count - 1);
+
                 _messagesView?.Refresh();
                 if (MessageList.Items.Count > 0)
                     MessageList.ScrollIntoView(MessageList.Items[0]);
@@ -164,6 +171,14 @@ namespace StartMode.Windows
         {
             e.Cancel = true;
             Hide();
+        }
+
+        protected override void OnClosed(EventArgs e)
+        {
+            _monitor.StatusChanged -= OnStatusChanged;
+            _monitor.CountsChanged -= OnCountsChanged;
+            _monitor.MessageReceived -= OnMessageReceived;
+            base.OnClosed(e);
         }
     }
 }

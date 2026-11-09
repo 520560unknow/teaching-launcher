@@ -1,186 +1,146 @@
-using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.IO;
-using System.Net.Http;
-using System.Text.Json;
 using StartMode.Models;
+using StartMode.Services.Messaging;
+using StartMode.Shared.Messaging;
+using StartMode.Shared.Models;
 
 namespace StartMode.Services
 {
-    public class MessageService
+    /// <summary>
+    /// 消息门面：聚合多个消息来源，统一写入 MessageStore 并向观察者推送。
+    /// 缓存、去重、未读统计与持久化都由 MessageStore 负责。
+    /// </summary>
+    public class MessageService : IMessageService
     {
-        private readonly ObservableCollection<StudentMessage> _messages = new();
-        private readonly string _cachePath;
-        private CancellationTokenSource? _cancellationTokenSource;
-        private Task? _pollingTask;
+        private readonly MessageStore _store;
+        private readonly List<IMessageSource> _sources;
+        private readonly List<IMessageObserver> _observers = new();
 
-        public event EventHandler<StudentMessage>? MessageReceived;
-        public event EventHandler<int>? UnreadCountChanged;
+        public int UnreadCount => _store.UnreadCount;
 
-        public ObservableCollection<StudentMessage> Messages => _messages;
-
-        public int UnreadCount => _messages.Count(m => m.Status == MessageStatus.Unread);
-
-        public MessageService()
+        public MessageService(AppConfig config, IEnumerable<IMessageSource> sources)
         {
-            _cachePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "messages_cache.json");
-            LoadCachedMessages();
+            _store = new MessageStore(
+                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "messages_cache.json"),
+                config.MaxCachedMessages);
+            _sources = sources.ToList();
+            foreach (var source in _sources)
+            {
+                source.MessageProduced += OnMessageProduced;
+            }
+        }
+
+        public void Subscribe(IMessageObserver observer)
+        {
+            lock (_observers)
+            {
+                if (!_observers.Contains(observer))
+                    _observers.Add(observer);
+            }
+        }
+
+        public void Unsubscribe(IMessageObserver observer)
+        {
+            lock (_observers)
+            {
+                _observers.Remove(observer);
+            }
         }
 
         public void StartListening()
         {
-            // 演示用的随机消息默认关闭，避免界面上出现虚构的学生消息
-            if (!App.ConfigService.Config.EnableSimulatedMessages)
-                return;
-
-            _cancellationTokenSource = new CancellationTokenSource();
-
-            _pollingTask = Task.Run(async () => await PollMessagesAsync(_cancellationTokenSource.Token));
+            foreach (var source in _sources)
+            {
+                source.Start();
+            }
         }
 
         public void StopListening()
         {
-            _cancellationTokenSource?.Cancel();
-            _pollingTask?.Wait(TimeSpan.FromSeconds(2));
-            SaveCachedMessages();
-        }
-
-        private async Task PollMessagesAsync(CancellationToken cancellationToken)
-        {
-            var config = App.ConfigService.Config;
-
-            while (!cancellationToken.IsCancellationRequested)
+            foreach (var source in _sources)
             {
-                try
-                {
-                    await SimulateMessageReceiveAsync();
-                    
-                    await Task.Delay(TimeSpan.FromSeconds(config.PollingIntervalSeconds), cancellationToken);
-                }
-                catch (OperationCanceledException)
-                {
-                    break;
-                }
-                catch (Exception ex)
-                {
-                    System.Diagnostics.Debug.WriteLine($"轮询消息失败: {ex.Message}");
-                    await Task.Delay(TimeSpan.FromSeconds(10), cancellationToken);
-                }
+                source.Stop();
             }
-        }
-
-        private async Task SimulateMessageReceiveAsync()
-        {
-            // 仅在显式开启模拟模式时生成示例消息
-            if (!App.ConfigService.Config.EnableSimulatedMessages)
-                return;
-
-            await Task.CompletedTask;
-            
-            var random = new Random();
-            if (random.Next(10) < 3)
-            {
-                var message = new StudentMessage
-                {
-                    StudentId = $"student_{random.Next(1, 20)}",
-                    StudentName = $"学生{random.Next(1, 20)}号",
-                    Type = (MessageType)random.Next(3),
-                    Content = GetRandomMessageContent(),
-                    Source = "课堂互动",
-                    Timestamp = DateTime.Now
-                };
-
-                AddMessage(message);
-            }
-        }
-
-        private string GetRandomMessageContent()
-        {
-            var contents = new[]
-            {
-                "老师讲得太好了！",
-                "这个知识点我明白了",
-                "能再解释一下吗？",
-                "我有不同看法",
-                "同意！",
-                "这个问题很有意思",
-                "我来补充一下...",
-                "请问这是重点吗？",
-                "明白了，谢谢老师",
-                "我觉得这样理解对吗？"
-            };
-            return contents[Random.Shared.Next(contents.Length)];
+            _store.Save();
         }
 
         public void AddMessage(StudentMessage message)
         {
-            _messages.Add(message);
-            MessageReceived?.Invoke(this, message);
-            UnreadCountChanged?.Invoke(this, UnreadCount);
+            _store.Add(message);
+            NotifyMessageReceived(message);
+            NotifyUnreadCountChanged();
         }
 
         public void MarkAsRead(string messageId)
         {
-            var message = _messages.FirstOrDefault(m => m.Id == messageId);
-            if (message != null)
+            if (_store.MarkAsRead(messageId))
             {
-                message.Status = MessageStatus.Read;
-                UnreadCountChanged?.Invoke(this, UnreadCount);
+                NotifyUnreadCountChanged();
             }
         }
 
         public void MarkAllAsRead()
         {
-            foreach (var message in _messages.Where(m => m.Status == MessageStatus.Unread))
-            {
-                message.Status = MessageStatus.Read;
-            }
-            UnreadCountChanged?.Invoke(this, UnreadCount);
+            _store.MarkAllAsRead();
+            NotifyUnreadCountChanged();
         }
 
         public List<StudentMessage> GetMessagesByType(MessageType? type = null)
         {
+            var messages = _store.Snapshot();
             if (type == null)
-                return _messages.ToList();
-            return _messages.Where(m => m.Type == type).ToList();
+            {
+                return messages.ToList();
+            }
+            return messages.Where(m => m.Type == type).ToList();
         }
 
-        private void LoadCachedMessages()
+        private void OnMessageProduced(object? sender, StudentMessage message)
         {
-            try
+            AddMessage(message);
+        }
+
+        private void NotifyMessageReceived(StudentMessage message)
+        {
+            IMessageObserver[] snapshot;
+            lock (_observers)
             {
-                if (File.Exists(_cachePath))
-                {
-                    var json = File.ReadAllText(_cachePath);
-                    var cached = JsonSerializer.Deserialize<List<StudentMessage>>(json);
-                    if (cached != null)
-                    {
-                        foreach (var msg in cached.Take(App.ConfigService.Config.MaxCachedMessages))
-                        {
-                            _messages.Add(msg);
-                        }
-                    }
-                }
+                snapshot = _observers.ToArray();
             }
-            catch (Exception ex)
+            foreach (var observer in snapshot)
             {
-                System.Diagnostics.Debug.WriteLine($"加载缓存消息失败: {ex.Message}");
+                SafeNotify(observer, () => observer.OnMessageReceived(message));
             }
         }
 
-        public void SaveCachedMessages()
+        private void NotifyUnreadCountChanged()
+        {
+            IMessageObserver[] snapshot;
+            lock (_observers)
+            {
+                snapshot = _observers.ToArray();
+            }
+            var count = UnreadCount;
+            foreach (var observer in snapshot)
+            {
+                SafeNotify(observer, () => observer.OnUnreadCountChanged(count));
+            }
+        }
+
+        /// <summary>
+        /// 单个观察者失败（例如窗口已关闭、界面线程已退出）不应中断消息流，
+        /// 否则 WebSocket 接收循环会被一起打断。
+        /// </summary>
+        private static void SafeNotify(IMessageObserver observer, Action callback)
         {
             try
             {
-                var messagesToSave = _messages
-                    .TakeLast(App.ConfigService.Config.MaxCachedMessages)
-                    .ToList();
-                var options = new JsonSerializerOptions { WriteIndented = true };
-                var json = JsonSerializer.Serialize(messagesToSave, options);
-                File.WriteAllText(_cachePath, json);
+                callback();
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"保存缓存消息失败: {ex.Message}");
+                Debug.WriteLine($"[Message] 通知观察者 {observer.GetType().Name} 失败: {ex.Message}");
             }
         }
     }

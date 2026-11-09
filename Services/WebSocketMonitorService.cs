@@ -1,10 +1,10 @@
-using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
 using System.Timers;
 using StartMode.Models;
+using StartMode.Shared.Protocol;
 using Timer = System.Timers.Timer;
 
 namespace StartMode.Services
@@ -17,7 +17,7 @@ namespace StartMode.Services
         Reconnecting
     }
 
-    public class WebSocketMonitorService : IDisposable
+    public class WebSocketMonitorService : IWebSocketMonitorService
     {
         private ClientWebSocket? _ws;
         private CancellationTokenSource? _cts;
@@ -28,6 +28,7 @@ namespace StartMode.Services
 
         private string _classroomId = "";
         private string _wsBaseUrl = "";
+        private int _generation;
 
         public MonitorStatus Status { get; private set; } = MonitorStatus.Disconnected;
         public string StatusText => Status switch
@@ -38,7 +39,6 @@ namespace StartMode.Services
             _ => "未连接"
         };
 
-        public ObservableCollection<ClassroomMessageItem> Messages { get; } = new();
         public int DanmakuCount { get; private set; }
         public int CommentCount { get; private set; }
         public int OpinionCount { get; private set; }
@@ -48,13 +48,13 @@ namespace StartMode.Services
         public event EventHandler<ClassroomMessageItem>? MessageReceived;
         public event EventHandler? CountsChanged;
 
-        public WebSocketMonitorService()
+        public WebSocketMonitorService(AppConfig config)
         {
-            _wsBaseUrl = App.ConfigService.Config.WebSocketBaseUrl;
+            _wsBaseUrl = config.WebSocketBaseUrl;
             if (string.IsNullOrWhiteSpace(_wsBaseUrl))
             {
                 // 未单独配置 websocket 地址时，从 serverBaseUrl 推导，避免写死 localhost
-                var serverBase = App.ConfigService.Config.ServerBaseUrl;
+                var serverBase = config.ServerBaseUrl;
                 if (!string.IsNullOrWhiteSpace(serverBase))
                     _wsBaseUrl = serverBase.Replace("http://", "ws://").Replace("https://", "wss://");
             }
@@ -74,8 +74,13 @@ namespace StartMode.Services
 
         public void Disconnect()
         {
+            _generation++;
             _heartbeatTimer?.Stop();
+            _heartbeatTimer?.Dispose();
+            _heartbeatTimer = null;
             _reconnectTimer?.Stop();
+            _reconnectTimer?.Dispose();
+            _reconnectTimer = null;
             _cts?.Cancel();
 
             try
@@ -101,52 +106,71 @@ namespace StartMode.Services
                 return;
             }
 
+            var generation = ++_generation;
             SetStatus(MonitorStatus.Connecting);
 
+            ClientWebSocket? ws = null;
+            CancellationTokenSource? cts = null;
             try
             {
-                _cts = new CancellationTokenSource();
-                _ws = new ClientWebSocket();
+                cts = new CancellationTokenSource();
+                ws = new ClientWebSocket();
 
-                var encodedClassroomId = Uri.EscapeDataString(_classroomId);
-                var uri = $"{_wsBaseUrl}/ws/student/{encodedClassroomId}?studentId=csharp_monitor";
+                var uri = WsEndpoints.StudentUri(_wsBaseUrl, _classroomId, "csharp_monitor");
                 Debug.WriteLine($"[WS] 连接: {uri}");
 
-                await _ws.ConnectAsync(new Uri(uri), _cts.Token);
+                await ws.ConnectAsync(new Uri(uri), cts.Token);
 
+                if (generation != _generation)
+                {
+                    // 连接期间被 Disconnect 或新一次连接取代，丢弃这次的结果
+                    ws.Abort();
+                    ws.Dispose();
+                    return;
+                }
+
+                _ws = ws;
+                _cts = cts;
                 SetStatus(MonitorStatus.Connected);
                 _reconnectDelay = 1;
-                StartHeartbeat();
-                _ = ReceiveLoopAsync();
+                StartHeartbeat(ws, cts, generation);
+                _ = ReceiveLoopAsync(ws, cts, generation);
             }
             catch (Exception ex)
             {
                 Debug.WriteLine($"[WS] 连接失败: {ex.Message}");
-                SetStatus(MonitorStatus.Reconnecting);
-                ScheduleReconnect();
+                ws?.Dispose();
+                if (generation == _generation)
+                {
+                    SetStatus(MonitorStatus.Reconnecting);
+                    ScheduleReconnect(generation);
+                }
             }
         }
 
-        private async Task ReceiveLoopAsync()
+        private async Task ReceiveLoopAsync(ClientWebSocket ws, CancellationTokenSource cts, int generation)
         {
             var buffer = new byte[8192];
 
             try
             {
-                while (_ws?.State == WebSocketState.Open && _cts?.IsCancellationRequested == false)
+                while (ws.State == WebSocketState.Open && !cts.IsCancellationRequested)
                 {
                     var sb = new StringBuilder();
                     WebSocketReceiveResult result;
 
                     do
                     {
-                        result = await _ws.ReceiveAsync(new ArraySegment<byte>(buffer), _cts!.Token);
+                        result = await ws.ReceiveAsync(new ArraySegment<byte>(buffer), cts.Token);
 
                         if (result.MessageType == WebSocketMessageType.Close)
                         {
                             Debug.WriteLine("[WS] 服务端关闭连接");
-                            SetStatus(MonitorStatus.Reconnecting);
-                            ScheduleReconnect();
+                            if (generation == _generation)
+                            {
+                                SetStatus(MonitorStatus.Reconnecting);
+                                ScheduleReconnect(generation);
+                            }
                             return;
                         }
 
@@ -162,22 +186,13 @@ namespace StartMode.Services
                 }
             }
             catch (OperationCanceledException) { }
-            catch (WebSocketException ex)
-            {
-                Debug.WriteLine($"[WS] 接收异常: {ex.Message}");
-                if (!_cts?.IsCancellationRequested ?? false)
-                {
-                    SetStatus(MonitorStatus.Reconnecting);
-                    ScheduleReconnect();
-                }
-            }
             catch (Exception ex)
             {
-                Debug.WriteLine($"[WS] 未知异常: {ex.Message}");
-                if (!_cts?.IsCancellationRequested ?? false)
+                Debug.WriteLine($"[WS] 接收异常: {ex.Message}");
+                if (generation == _generation && !cts.IsCancellationRequested)
                 {
                     SetStatus(MonitorStatus.Reconnecting);
-                    ScheduleReconnect();
+                    ScheduleReconnect(generation);
                 }
             }
         }
@@ -198,14 +213,7 @@ namespace StartMode.Services
                     default: SystemCount++; break;
                 }
 
-                System.Windows.Application.Current.Dispatcher.Invoke(() =>
-                {
-                    Messages.Insert(0, item);
-                    // 限制最大条数
-                    while (Messages.Count > 500)
-                        Messages.RemoveAt(Messages.Count - 1);
-                });
-
+                // 只抛事件，由订阅端自行调度到 UI 线程并维护消息列表
                 MessageReceived?.Invoke(this, item);
                 CountsChanged?.Invoke(this, EventArgs.Empty);
             }
@@ -215,23 +223,33 @@ namespace StartMode.Services
             }
         }
 
-        private void StartHeartbeat()
+        private void StartHeartbeat(ClientWebSocket ws, CancellationTokenSource cts, int generation)
         {
             _heartbeatTimer?.Dispose();
             _heartbeatTimer = new Timer(25000);
             _heartbeatTimer.Elapsed += async (s, e) =>
             {
-                if (_ws?.State == WebSocketState.Open)
+                if (ws.State != WebSocketState.Open || generation != _generation)
                 {
-                    try
+                    return;
+                }
+
+                try
+                {
+                    var ping = Encoding.UTF8.GetBytes(WsEndpoints.PingPayload);
+                    await ws.SendAsync(new ArraySegment<byte>(ping), WebSocketMessageType.Text, true, cts.Token);
+                    Debug.WriteLine("[WS] 心跳发送");
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[WS] 心跳失败: {ex.Message}");
+                    if (generation == _generation)
                     {
-                        var ping = Encoding.UTF8.GetBytes("{\"type\":\"PING\"}");
-                        await _ws.SendAsync(new ArraySegment<byte>(ping), WebSocketMessageType.Text, true, _cts!.Token);
-                        Debug.WriteLine("[WS] 心跳发送");
-                    }
-                    catch (Exception ex)
-                    {
-                        Debug.WriteLine($"[WS] 心跳失败: {ex.Message}");
+                        // 心跳失败说明连接已不可用，按断线处理而不是留一个假"已连接"状态
+                        _heartbeatTimer?.Stop();
+                        ws.Abort();
+                        SetStatus(MonitorStatus.Reconnecting);
+                        ScheduleReconnect(generation);
                     }
                 }
             };
@@ -239,13 +257,17 @@ namespace StartMode.Services
             _heartbeatTimer.Start();
         }
 
-        private void ScheduleReconnect()
+        private void ScheduleReconnect(int generation)
         {
             _reconnectTimer?.Dispose();
             _reconnectTimer = new Timer(_reconnectDelay * 1000);
             _reconnectTimer.AutoReset = false;
             _reconnectTimer.Elapsed += async (s, e) =>
             {
+                if (generation != _generation)
+                {
+                    return;
+                }
                 Debug.WriteLine($"[WS] {_reconnectDelay}秒后重连...");
                 await ConnectAsync();
             };

@@ -1,7 +1,7 @@
 <Window x:Class="StudentMessageBall.Windows.MessagePanelWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:models="clr-namespace:StudentMessageBall.Models"
+        xmlns:models="clr-namespace:StartMode.Shared.Models;assembly=StartMode.Shared"
         Title="学生消息" Height="500" Width="380"
         WindowStyle="ToolWindow"
         WindowStartupLocation="Manual"

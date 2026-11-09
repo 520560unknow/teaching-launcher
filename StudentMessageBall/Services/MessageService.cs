@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
+using StartMode.Shared.Models;
 using StudentMessageBall.Models;
 using SysTimer = System.Threading.Timer;
 

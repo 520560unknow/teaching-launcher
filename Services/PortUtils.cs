@@ -57,6 +57,26 @@ namespace StartMode.Services
             return killed;
         }
 
+        /// <summary>端口是否被指定名称的进程占用（用于退出时只清理本系统的 java 进程）。</summary>
+        public static bool IsHeldBy(int port, params string[] processNames)
+        {
+            foreach (var pid in FindListeningPids(port))
+            {
+                try
+                {
+                    var name = Process.GetProcessById(pid).ProcessName;
+                    if (processNames.Any(n => string.Equals(n, name, StringComparison.OrdinalIgnoreCase)))
+                        return true;
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[Port] 读取 PID={pid} 进程名失败: {ex.Message}");
+                }
+            }
+
+            return false;
+        }
+
         public static int WaitUntilClosed(int port, int timeoutMs = 8000)
         {
             var deadline = Environment.TickCount64 + timeoutMs;

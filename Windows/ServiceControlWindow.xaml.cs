@@ -3,6 +3,8 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Shapes;
 using System.Windows.Threading;
+using StartMode.Models;
+using StartMode.Services;
 using MediaColor = System.Windows.Media.Color;
 
 namespace StartMode.Windows
@@ -10,14 +12,19 @@ namespace StartMode.Windows
     public partial class ServiceControlWindow : Window
     {
         private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(3) };
+        private readonly IJavaAppService _javaAppService;
+        private readonly ILlamaService _llamaService;
         private readonly int _webPort;
         private bool _busy;
 
-        public ServiceControlWindow()
+        public ServiceControlWindow(IJavaAppService javaAppService, ILlamaService llamaService, AppConfig config)
         {
             InitializeComponent();
 
-            _webPort = Uri.TryCreate(App.ConfigService.Config.ServerBaseUrl, UriKind.Absolute, out var uri)
+            _javaAppService = javaAppService;
+            _llamaService = llamaService;
+
+            _webPort = Uri.TryCreate(config.ServerBaseUrl, UriKind.Absolute, out var uri)
                 ? uri.Port
                 : 8080;
 
@@ -47,13 +54,13 @@ namespace StartMode.Windows
             if (_busy)
                 return;
 
-            var webRunning = await App.JavaAppService.IsServerHealthyAsync();
-            var aiRunning = await App.LlamaService.IsRunningAsync();
+            var webRunning = await _javaAppService.IsServerHealthyAsync();
+            var aiRunning = await _llamaService.IsRunningAsync();
 
-            ApplyState(WebStatusDot, WebStatusText, webRunning, App.JavaAppService.IsStarting,
+            ApplyState(WebStatusDot, WebStatusText, webRunning, _javaAppService.IsStarting,
                 $"运行中 · 端口 {_webPort}", "已停止");
-            ApplyState(AiStatusDot, AiStatusText, aiRunning, App.LlamaService.IsStarting,
-                $"运行中 · 端口 {App.LlamaService.Port}", "已停止");
+            ApplyState(AiStatusDot, AiStatusText, aiRunning, _llamaService.IsStarting,
+                $"运行中 · 端口 {_llamaService.Port}", "已停止");
         }
 
         private static void ApplyState(Ellipse dot, System.Windows.Controls.TextBlock text, bool running,
@@ -82,7 +89,7 @@ namespace StartMode.Windows
             if (!BeginBusy("正在启动网页服务…"))
                 return;
 
-            var ok = await App.JavaAppService.StartAsync();
+            var ok = await _javaAppService.StartAsync();
             EndBusy(ok ? "网页服务已启动" : "网页服务启动失败，请检查 Java 与 JAR 路径");
             await RefreshAsync();
         }
@@ -92,7 +99,7 @@ namespace StartMode.Windows
             if (!BeginBusy("正在关闭网页服务…"))
                 return;
 
-            var (ok, message) = await App.JavaAppService.StopAsync();
+            var (ok, message) = await _javaAppService.StopAsync();
             EndBusy(message, ok);
             await RefreshAsync();
         }
@@ -102,7 +109,7 @@ namespace StartMode.Windows
             if (!BeginBusy("正在启动 AI 服务（首次加载模型较慢）…"))
                 return;
 
-            var (ok, message) = await App.LlamaService.StartAsync();
+            var (ok, message) = await _llamaService.StartAsync();
             EndBusy(message, ok);
             await RefreshAsync();
         }
@@ -112,7 +119,7 @@ namespace StartMode.Windows
             if (!BeginBusy("正在关闭 AI 服务…"))
                 return;
 
-            var (ok, message) = await App.LlamaService.StopAsync();
+            var (ok, message) = await _llamaService.StopAsync();
             EndBusy(message, ok);
             await RefreshAsync();
         }

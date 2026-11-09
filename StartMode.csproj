@@ -31,19 +31,33 @@
     <None Update="app\json-storage\**\*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <None Update="app\jre8\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
   <ItemGroup>
-    <Compile Remove="WpfApp1\**" />
-    <EmbeddedResource Remove="WpfApp1\**" />
-    <None Remove="WpfApp1\**" />
-    <Page Remove="WpfApp1\**" />
+    <!-- StudentMessageBall 是独立项目，主工程只管启动器 -->
+    <Compile Remove="StudentMessageBall\**" />
+    <EmbeddedResource Remove="StudentMessageBall\**" />
+    <None Remove="StudentMessageBall\**" />
+    <Page Remove="StudentMessageBall\**" />
 
     <!-- 提交包内的源码副本不参与编译，否则会与主工程重复定义 -->
     <Compile Remove="李儒健202410011831+课堂智答\**" />
     <EmbeddedResource Remove="李儒健202410011831+课堂智答\**" />
     <None Remove="李儒健202410011831+课堂智答\**" />
     <Page Remove="李儒健202410011831+课堂智答\**" />
+
+    <!-- StartMode.Shared 是独立类库，由主工程与学生端共同引用 -->
+    <Compile Remove="StartMode.Shared\**" />
+    <EmbeddedResource Remove="StartMode.Shared\**" />
+    <None Remove="StartMode.Shared\**" />
+    <Page Remove="StartMode.Shared\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="StartMode.Shared\StartMode.Shared.csproj" />
   </ItemGroup>
 
 </Project>

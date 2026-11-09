@@ -1,22 +1,17 @@
 using System.Windows;
 using StartMode.Services;
+using StartMode.Services.Messaging;
 
 namespace StartMode
 {
     public partial class App : System.Windows.Application
     {
-        private static MessageService? _messageService;
-        private static ConfigService? _configService;
-        private static JavaAppService? _javaAppService;
-        private static LlamaService? _llamaService;
-        private static WebSocketMonitorService? _wsMonitorService;
-        private static Windows.FloatingBallWindow? _floatingBallWindow;
-
-        public static MessageService MessageService => _messageService ??= new MessageService();
-        public static ConfigService ConfigService => _configService ??= new ConfigService();
-        public static JavaAppService JavaAppService => _javaAppService ??= new JavaAppService();
-        public static LlamaService LlamaService => _llamaService ??= new LlamaService();
-        public static WebSocketMonitorService WsMonitorService => _wsMonitorService ??= new WebSocketMonitorService();
+        private IMessageService? _messageService;
+        private ConfigService? _configService;
+        private IJavaAppService? _javaAppService;
+        private ILlamaService? _llamaService;
+        private IWebSocketMonitorService? _wsMonitorService;
+        private Windows.FloatingBallWindow? _floatingBallWindow;
 
         protected override void OnStartup(StartupEventArgs e)
         {
@@ -25,18 +20,26 @@ namespace StartMode
             try
             {
                 // 初始化配置服务
-                _configService = new ConfigService();
-                
-                // 初始化消息服务
-                _messageService = new MessageService();
-                _messageService.StartListening();
-                
-                // 初始化 Java 应用服务
-                _javaAppService = new JavaAppService();
-                _llamaService = new LlamaService();
-                
+                var configService = new ConfigService();
+                _configService = configService;
+                var config = configService.Config;
+
+                // 初始化 Java 应用服务、本地模型服务与课堂 WebSocket 监听
+                var javaAppService = new JavaAppService(config);
+                _javaAppService = javaAppService;
+                var llamaService = new LlamaService(config);
+                _llamaService = llamaService;
+                var wsMonitorService = new WebSocketMonitorService(config);
+                _wsMonitorService = wsMonitorService;
+
+                // 初始化消息服务：来源由工厂组装，统一交给 MessageStore
+                var messageService = new MessageService(config, MessageSourceFactory.Create(config, wsMonitorService));
+                _messageService = messageService;
+                messageService.StartListening();
+
                 // 创建并显示悬浮球窗口
-                _floatingBallWindow = new Windows.FloatingBallWindow();
+                _floatingBallWindow = new Windows.FloatingBallWindow(
+                    config, messageService, javaAppService, llamaService, wsMonitorService);
                 MainWindow = _floatingBallWindow;
                 _floatingBallWindow.Show();
                 _floatingBallWindow.Activate();
@@ -96,7 +99,15 @@ namespace StartMode
 
         protected override void OnExit(ExitEventArgs e)
         {
-            try { _llamaService?.StopAsync().Wait(TimeSpan.FromSeconds(8)); }
+            try
+            {
+                var stopTask = _llamaService?.StopAsync();
+                if (stopTask != null && !stopTask.Wait(TimeSpan.FromSeconds(2)))
+                {
+                    _llamaService!.StopImmediately();
+                    System.Diagnostics.Debug.WriteLine("AI 服务停止超时，已强制结束");
+                }
+            }
             catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"停止 AI 服务失败: {ex.Message}"); }
 
             try { _javaAppService?.StopJavaApp(); }

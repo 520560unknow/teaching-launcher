@@ -156,11 +156,12 @@
                            VerticalAlignment="Center"/>
             </Button>
             
-            <!-- 子悬浮球2：打开信息显示 -->
+            <!-- 子悬浮球：打开信息显示 -->
             <Button x:Name="SubBall2" 
                     Width="60" Height="60" 
                     Click="SubBall2_Click"
                     Cursor="Hand"
+                    Margin="0,0,0,10"
                     Template="{StaticResource SubBallTemplate}">
                 <Button.Background>
                     <SolidColorBrush Color="#FF9800"/>

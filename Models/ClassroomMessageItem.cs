@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using StartMode.Shared.Protocol;
 
 namespace StartMode.Models
 {
@@ -108,9 +109,9 @@ namespace StartMode.Models
         {
             return type?.ToUpperInvariant() switch
             {
-                "DANMAKU_RECEIVED" or "STUDENT_DANMAKU" or "TEACHER_DANMAKU_SENT" or "DANMAKU_SENT_SUCCESS" => MessageCategory.Danmaku,
-                "COMMENT_RECEIVED" or "NEW_COMMENT" or "TEACHER_COMMENT_SENT" or "COMMENT_SENT_SUCCESS" => MessageCategory.Comment,
-                "OPINION_RECEIVED" or "OPINION_SENT_SUCCESS" => MessageCategory.Opinion,
+                WsMessageTypes.DanmakuReceived or WsMessageTypes.StudentDanmaku or WsMessageTypes.TeacherDanmakuSent or WsMessageTypes.DanmakuSentSuccess => MessageCategory.Danmaku,
+                WsMessageTypes.CommentReceived or WsMessageTypes.NewComment or WsMessageTypes.TeacherCommentSent or WsMessageTypes.CommentSentSuccess => MessageCategory.Comment,
+                WsMessageTypes.OpinionReceived or WsMessageTypes.OpinionSentSuccess => MessageCategory.Opinion,
                 _ => MessageCategory.System
             };
         }

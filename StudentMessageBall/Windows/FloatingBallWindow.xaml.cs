@@ -3,6 +3,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
+using StartMode.Shared.Models;
 using StudentMessageBall.Services;
 using WpfMouseEventArgs = System.Windows.Input.MouseEventArgs;
 using WpfMouseButtonEventArgs = System.Windows.Input.MouseButtonEventArgs;
@@ -205,24 +206,30 @@ public partial class FloatingBallWindow : Window
             return;
         }
 
-        _messagePanelWindow = new MessagePanelWindow();
-        _messagePanelWindow.Closed += (s, e) => _messagePanelWindow = null;
+        // 复用已存在的窗口：关闭才销毁，隐藏只是不可见；直接 new 会让旧窗口一直挂在后台
+        if (_messagePanelWindow == null)
+        {
+            _messagePanelWindow = new MessagePanelWindow();
+            _messagePanelWindow.Closed += (s, e) => _messagePanelWindow = null;
 
-        // 定位在悬浮球旁边
-        if (Left > SystemParameters.WorkArea.Width / 2)
-            _messagePanelWindow.Left = Left - _messagePanelWindow.Width - 10;
-        else
-            _messagePanelWindow.Left = Left + Width + 10;
+            // 定位在悬浮球旁边
+            if (Left > SystemParameters.WorkArea.Width / 2)
+                _messagePanelWindow.Left = Left - _messagePanelWindow.Width - 10;
+            else
+                _messagePanelWindow.Left = Left + Width + 10;
 
-        _messagePanelWindow.Top = Math.Max(0, Math.Min(Top, SystemParameters.WorkArea.Height - _messagePanelWindow.Height));
+            _messagePanelWindow.Top = Math.Max(0, Math.Min(Top, SystemParameters.WorkArea.Height - _messagePanelWindow.Height));
+        }
+
         _messagePanelWindow.Show();
+        _messagePanelWindow.Activate();
     }
 
     #endregion
 
     #region 消息通知
 
-    private void OnMessagesReceived(List<Models.StudentMessage> messages)
+    private void OnMessagesReceived(List<StudentMessage> messages)
     {
         Dispatcher.Invoke(() =>
         {

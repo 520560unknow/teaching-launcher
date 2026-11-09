@@ -4,23 +4,42 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using StartMode.Models;
+using StartMode.Services;
+using StartMode.Services.Messaging;
+using StartMode.Shared.Models;
 
 using WpfMessageBox = System.Windows.MessageBox;
 
 namespace StartMode.Windows
 {
-    public partial class FloatingBallWindow : Window
+    public partial class FloatingBallWindow : Window, IMessageObserver
     {
         private bool _isDragging = false;
         private System.Windows.Point _dragStartPoint;
+        private readonly AppConfig _config;
+        private readonly IMessageService _messageService;
+        private readonly IJavaAppService _javaAppService;
+        private readonly ILlamaService _llamaService;
+        private readonly IWebSocketMonitorService _wsMonitorService;
         private WebAppWindow? _webAppWindow;
         private WebSocketMessageWindow? _wsMessageWindow;
         private ServiceControlWindow? _serviceWindow;
         private System.Windows.Forms.NotifyIcon? _notifyIcon;
         private bool _isSubBallsVisible = false;
 
-        public FloatingBallWindow()
+        public FloatingBallWindow(
+            AppConfig config,
+            IMessageService messageService,
+            IJavaAppService javaAppService,
+            ILlamaService llamaService,
+            IWebSocketMonitorService wsMonitorService)
         {
+            _config = config;
+            _messageService = messageService;
+            _javaAppService = javaAppService;
+            _llamaService = llamaService;
+            _wsMonitorService = wsMonitorService;
+
             InitializeComponent();
             InitializeTransform();
             InitializeNotifyIcon();
@@ -59,26 +78,29 @@ namespace StartMode.Windows
 
         private void SetupMessageService()
         {
-            var messageService = App.MessageService;
-            messageService.MessageReceived += OnMessageReceived;
-            messageService.UnreadCountChanged += OnUnreadCountChanged;
+            _messageService.Subscribe(this);
         }
 
-        private void OnMessageReceived(object? sender, StudentMessage message)
+        public void OnMessageReceived(StudentMessage message)
         {
-            Dispatcher.Invoke(() =>
+            RunOnUiThread(() =>
             {
                 ShowMessageAnimation();
                 ShowMessageBubble(message);
             });
         }
 
-        private void OnUnreadCountChanged(object? sender, int count)
+        public void OnUnreadCountChanged(int unreadCount)
         {
-            Dispatcher.Invoke(() =>
-            {
-                UpdateBadge(count);
-            });
+            RunOnUiThread(() => UpdateBadge(unreadCount));
+        }
+
+        /// <summary>消息来自后台线程，异步投递到界面线程，避免阻塞接收循环；窗口已关闭时直接丢弃。</summary>
+        private void RunOnUiThread(Action action)
+        {
+            if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished)
+                return;
+            Dispatcher.InvokeAsync(action);
         }
 
         private void UpdateBadge(int count)
@@ -145,6 +167,7 @@ namespace StartMode.Windows
 
         private void Window_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
         {
+            _messageService.Unsubscribe(this);
             _notifyIcon?.Dispose();
         }
 
@@ -294,7 +317,7 @@ namespace StartMode.Windows
             {
                 if (_webAppWindow == null || !_webAppWindow.IsLoaded)
                 {
-                    _webAppWindow = new WebAppWindow();
+                    _webAppWindow = new WebAppWindow(_javaAppService, _config);
                     _webAppWindow.Show();
                 }
                 else
@@ -317,7 +340,7 @@ namespace StartMode.Windows
         {
             if (_wsMessageWindow == null || !_wsMessageWindow.IsLoaded)
             {
-                _wsMessageWindow = new WebSocketMessageWindow();
+                _wsMessageWindow = new WebSocketMessageWindow(_wsMonitorService);
 
                 var screenLeft = SystemParameters.VirtualScreenLeft;
                 var screenWidth = SystemParameters.VirtualScreenWidth;
@@ -353,7 +376,7 @@ namespace StartMode.Windows
         {
             if (_serviceWindow == null || !_serviceWindow.IsLoaded)
             {
-                _serviceWindow = new ServiceControlWindow();
+                _serviceWindow = new ServiceControlWindow(_javaAppService, _llamaService, _config);
 
                 var screenLeft = SystemParameters.VirtualScreenLeft;
                 var screenWidth = SystemParameters.VirtualScreenWidth;

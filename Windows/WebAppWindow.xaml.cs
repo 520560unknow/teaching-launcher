@@ -1,16 +1,22 @@
 using System.Windows;
 using Microsoft.Web.WebView2.Core;
+using StartMode.Models;
+using StartMode.Services;
 
 namespace StartMode.Windows
 {
     public partial class WebAppWindow : Window
     {
+        private readonly IJavaAppService _javaAppService;
+        private readonly AppConfig _config;
         private bool _isStarting = false;
         private int _retryCount = 0;
         private const int MaxRetries = 5;
 
-        public WebAppWindow()
+        public WebAppWindow(IJavaAppService javaAppService, AppConfig config)
         {
+            _javaAppService = javaAppService;
+            _config = config;
             InitializeComponent();
         }
 
@@ -33,7 +39,7 @@ namespace StartMode.Windows
                 StatusText.Text = "正在检查课堂互动服务...";
                 LoadingProgress.Visibility = Visibility.Visible;
 
-                var ready = await App.JavaAppService.EnsureStartedAsync();
+                var ready = await _javaAppService.EnsureStartedAsync();
 
                 if (!ready)
                 {
@@ -60,7 +66,7 @@ namespace StartMode.Windows
             LoadingProgress.Visibility = Visibility.Visible;
             ErrorPanel.Visibility = Visibility.Collapsed;
 
-            var ready = await App.JavaAppService.EnsureStartedAsync();
+            var ready = await _javaAppService.EnsureStartedAsync();
             if (!ready)
             {
                 ShowError("服务启动失败，请检查 Java 环境和 JAR 文件。");
@@ -72,7 +78,7 @@ namespace StartMode.Windows
 
         private void LoadPage()
         {
-            var url = App.ConfigService.Config.WebAppUrl;
+            var url = _config.WebAppUrl;
             StatusText.Text = $"正在加载: {url}";
             LoadingProgress.Visibility = Visibility.Visible;
             ErrorPanel.Visibility = Visibility.Collapsed;
@@ -120,7 +126,7 @@ namespace StartMode.Windows
                 return;
             }
 
-            var healthy = await App.JavaAppService.IsServerHealthyAsync();
+            var healthy = await _javaAppService.IsServerHealthyAsync();
 
             if (!healthy)
             {
@@ -187,7 +193,7 @@ namespace StartMode.Windows
         {
             try
             {
-                var url = App.ConfigService.Config.WebAppUrl;
+                var url = _config.WebAppUrl;
                 if (WebView?.CoreWebView2 != null)
                 {
                     WebView.CoreWebView2.Navigate(url);

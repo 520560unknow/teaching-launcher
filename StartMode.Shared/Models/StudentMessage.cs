@@ -1,9 +1,9 @@
 using System.Text.Json.Serialization;
 
-namespace StudentMessageBall.Models;
+namespace StartMode.Shared.Models;
 
 /// <summary>
-/// 学生消息数据模型
+/// 学生消息数据模型（主工程与学生端共用，字段与 JSON 名称保持不变）。
 /// </summary>
 public class StudentMessage
 {
@@ -30,41 +30,43 @@ public class StudentMessage
 
     [JsonPropertyName("status")]
     public MessageStatus Status { get; set; } = MessageStatus.Unread;
+
+    /// <summary>显示用的类型名称</summary>
+    [JsonIgnore]
+    public string TypeName => Type switch
+    {
+        MessageType.Comment => "评论",
+        MessageType.Danmaku => "弹幕",
+        MessageType.Opinion => "观点",
+        _ => "未知"
+    };
+
+    /// <summary>显示用的时间格式</summary>
+    [JsonIgnore]
+    public string TimeDisplay => Timestamp.ToString("HH:mm:ss");
+
+    /// <summary>显示用的完整时间</summary>
+    [JsonIgnore]
+    public string FullTimeDisplay => Timestamp.ToString("yyyy-MM-dd HH:mm:ss");
 }
 
-/// <summary>
-/// 消息类型枚举
-/// </summary>
+/// <summary>消息类型枚举</summary>
 public enum MessageType
 {
-    [JsonPropertyName("comment")]
     Comment,
-
-    [JsonPropertyName("danmaku")]
     Danmaku,
-
-    [JsonPropertyName("opinion")]
     Opinion
 }
 
-/// <summary>
-/// 消息状态枚举
-/// </summary>
+/// <summary>消息状态枚举</summary>
 public enum MessageStatus
 {
-    [JsonPropertyName("unread")]
     Unread,
-
-    [JsonPropertyName("read")]
     Read,
-
-    [JsonPropertyName("processed")]
     Processed
 }
 
-/// <summary>
-/// 消息类型的中文显示名
-/// </summary>
+/// <summary>消息类型的中文显示名</summary>
 public static class MessageTypeExtensions
 {
     public static string ToChineseName(this MessageType type) => type switch

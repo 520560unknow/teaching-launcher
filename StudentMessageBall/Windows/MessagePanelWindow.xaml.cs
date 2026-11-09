@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Windows;
 using System.Windows.Data;
+using StartMode.Shared.Models;
 using StudentMessageBall.Models;
 using StudentMessageBall.Services;
 
